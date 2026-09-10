@@ -1,0 +1,9 @@
+{
+  "name": "win-ftth-mapping-planner-v5",
+  "version": "5.0.0",
+  "private": true,
+  "description": "WIN FTTH Mapping/Planner v5 - full stack local + Vercel-ready",
+  "scripts": {"start":"node server.js"},
+  "engines": {"node": ">=18"},
+  "dependencies": {"pg":"^8.16.3"}
+}
