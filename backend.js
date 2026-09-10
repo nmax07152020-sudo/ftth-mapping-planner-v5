@@ -57,12 +57,21 @@ const seed = {
 function hashPassword(password){ return crypto.createHash('sha256').update(password).digest('hex'); }
 function safeJsonParse(v, fallback){ try{return JSON.parse(v)}catch{return fallback} }
 function cloneSeed(){ return JSON.parse(JSON.stringify(seed)); }
+let memoryDb = null;
 function ensureLocal(){
-  if(!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR,{recursive:true});
-  if(!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, JSON.stringify(cloneSeed(),null,2));
+  if(memoryDb) return;
+  try {
+    if(!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR,{recursive:true});
+    if(!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, JSON.stringify(cloneSeed(),null,2));
+    memoryDb = safeJsonParse(fs.readFileSync(DATA_FILE,'utf8'), cloneSeed());
+  } catch (_) {
+    // Vercel/serverless filesystem is not a reliable writable database.
+    // Use an in-memory seeded store as the no-DATABASE_URL fallback so API/login stay functional.
+    memoryDb = cloneSeed();
+  }
 }
-function readLocal(){ ensureLocal(); return safeJsonParse(fs.readFileSync(DATA_FILE,'utf8'), cloneSeed()); }
-function writeLocal(db){ ensureLocal(); fs.writeFileSync(DATA_FILE, JSON.stringify(db,null,2)); }
+function readLocal(){ ensureLocal(); return memoryDb; }
+function writeLocal(db){ memoryDb = db; try { if(!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR,{recursive:true}); fs.writeFileSync(DATA_FILE, JSON.stringify(db,null,2)); } catch (_) {} }
 
 let pool = null;
 if (process.env.DATABASE_URL && pg) pool = new pg.Pool({connectionString:process.env.DATABASE_URL,ssl:{rejectUnauthorized:false},max:5});
@@ -144,13 +153,16 @@ async function addActivity(actor,activity,status){
 async function routeApi(req,res){
   const url = new URL(req.url, 'http://localhost');
   const pathname=url.pathname;
-  if(pathname==='/api/health') return json(res,200,{ok:true,database:pool?'Postgres-capable':'Local JSON',timestamp:new Date().toISOString()});
+  if(pathname==='/api/health') return json(res,200,{ok:true,database:pool?'Postgres':'In-memory fallback',timestamp:new Date().toISOString()});
   if(pathname==='/api/login' && req.method==='POST'){
     const b=await body(req);const username=String(b.username||'').trim();const password=String(b.password||'');
     let user=null;
     if(await ensurePg()){const r=await pool.query('SELECT username,password_hash,role,name FROM users WHERE username=$1',[username]);user=r.rows[0]||null}
     else {user=readLocal().users.find(u=>u.username===username)||null}
-    if(!user || !crypto.timingSafeEqual(Buffer.from(user.password_hash),Buffer.from(hashPassword(password)))) return json(res,401,{error:'Invalid username or password'});
+    const expectedHash=hashPassword(password);
+    if(!user) return json(res,401,{error:'Invalid username or password'});
+    const stored=String(user.password_hash||'');
+    if(stored.length!==expectedHash.length || !crypto.timingSafeEqual(Buffer.from(stored),Buffer.from(expectedHash))) return json(res,401,{error:'Invalid username or password'});
     const token=sign({username:user.username,role:user.role,name:user.name,exp:Date.now()+1000*60*60*12});
     return json(res,200,{token,user:{username:user.username,role:user.role,name:user.name}});
   }
