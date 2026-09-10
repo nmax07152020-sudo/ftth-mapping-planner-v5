@@ -4,8 +4,6 @@ const crypto = require('crypto');
 let pg = null;
 try { pg = require('pg'); } catch (_) { pg = null; }
 
-const DATA_DIR = path.join(__dirname, 'data');
-const DATA_FILE = path.join(DATA_DIR, 'db.json');
 const SESSION_SECRET = process.env.SESSION_SECRET || 'WIN-Ftth-V5-Change-This-Secret';
 
 const seed = {
@@ -153,7 +151,7 @@ async function addActivity(actor,activity,status){
 async function routeApi(req,res){
   const url = new URL(req.url, 'http://localhost');
   const pathname=url.pathname;
-  if(pathname==='/api/health') return json(res,200,{ok:true,database:pool?'Postgres':'In-memory fallback',timestamp:new Date().toISOString()});
+  if(pathname==='/api/health') return json(res,200,{ok:true,database:pool?'Postgres':'In-memory',timestamp:new Date().toISOString()});
   if(pathname==='/api/login' && req.method==='POST'){
     const b=await body(req);const username=String(b.username||'').trim();const password=String(b.password||'');
     let user=null;
